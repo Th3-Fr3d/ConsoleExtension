@@ -9,7 +9,12 @@ namespace CE
     public struct ConsoleExtension
     {
         public static StringBuilder consoleBuffer = new StringBuilder();
+        public static StringBuilder tabBuffer = new StringBuilder();
+        public static List<string> consoleHistory = new List<string>();
+        public static int historyIndex = -1;
         public static string formatPrompt = string.Empty;
+        private static bool lastKeyWasTab = false;
+        private static int tabIndex = 0;
         /// <summary>
         /// Reads the next line of characters from the standard input stream.
         /// </summary>
@@ -89,6 +94,56 @@ namespace CE
             return userInput;
         }
 
+        public static void ResetInputLine()
+        {
+            string _override = new string(' ', formatPrompt.Length + consoleBuffer.Length);
+            if (_override.Length > 0)
+            {
+                Console.Write("\r" + _override);
+            }
+            bool isfirstRealText = true;
+            string[] textElements = formatPrompt.Split('\x00');
+            for (int i = 0; i < textElements.Count(); i++)
+            {
+                if (textElements[i].Length > 1)
+                {
+                    if (textElements[i].Substring(0, 2).Equals("|\x01"))
+                    {
+                        int index = Convert.ToInt32(textElements[i].Replace("|\x01", ""));
+                        if (index > -1 && index < 16)
+                        {
+                            Console.ForegroundColor = (ConsoleColor)index;
+                        }
+                        else
+                        {
+                            throw new IndexOutOfRangeException("INVALID_CONSOLE_COLOR");
+                        }
+                    }
+                    else
+                    {
+                        if (isfirstRealText)
+                        {
+                            Console.Write("\r" + textElements[i]);
+                            isfirstRealText = false;
+                        }
+                        else
+                        {
+                            Console.Write(textElements[i]);
+                        }
+                    }
+                }
+                else if (isfirstRealText)
+                {
+                    Console.Write("\r" + textElements[i]);
+                    isfirstRealText = false;
+                }
+                else
+                {
+                    Console.Write(textElements[i]);
+                }
+            }
+        }
+
         public static string ReadLineSafe()
         {
             consoleBuffer = new StringBuilder();
@@ -99,21 +154,111 @@ namespace CE
                 {
                     Console.Write("\r\n");
                     string userInput = consoleBuffer.ToString();
+                    consoleHistory.Add(userInput);
                     consoleBuffer.Clear();
                     formatPrompt = string.Empty;
+                    historyIndex = -1;
+                    lastKeyWasTab = false;
                     return userInput;
+                }
+                else if (key.Key == ConsoleKey.Tab)
+                {
+                    string tabCompletionCandiate = string.Empty;
+                    if (!lastKeyWasTab)
+                    {
+                        tabIndex = 0;
+                    }
+                    string[] tabCompletionCandidates = consoleHistory.Where(command => command.Contains(tabBuffer.ToString())).ToArray();
+                    try
+                    {
+                        tabCompletionCandiate = tabCompletionCandidates[tabIndex];
+                        tabIndex++;
+                    }
+                    catch
+                    {
+                        if (tabCompletionCandidates.Count() != 0)
+                        {
+                            tabIndex = 0;
+                            tabCompletionCandiate = tabCompletionCandidates[tabIndex];
+                            tabIndex++;
+                        }
+                        else
+                        {
+                            lastKeyWasTab = false;
+                            continue;
+                        }
+                    }
+                    lastKeyWasTab = true;
+                    ResetInputLine();
+                    Console.Write(tabCompletionCandiate);
+                    consoleBuffer = new StringBuilder(tabCompletionCandiate);
+                }
+                else if (key.Key == ConsoleKey.UpArrow)
+                {
+                    if (consoleHistory.Count() < 1)
+                    {
+                        continue;
+                    }
+                    if (historyIndex == -1)
+                    {
+                        historyIndex = consoleHistory.Count() - 1;
+                    }
+                    ResetInputLine();
+                    if (historyIndex - 1 > -1)
+                    {
+                        historyIndex--;
+                    }
+                    Console.Write(consoleHistory[historyIndex]);
+                    consoleBuffer = new StringBuilder(consoleHistory[historyIndex]);
+                    lastKeyWasTab = false;
+                }
+                else if (key.Key == ConsoleKey.DownArrow)
+                {
+                    if (consoleHistory.Count() < 1)
+                    {
+                        continue;
+                    }
+                    if (historyIndex == -1)
+                    {
+                        historyIndex = consoleHistory.Count() - 1;
+                    }
+                    ResetInputLine();
+                    if (historyIndex + 1 < consoleHistory.Count())
+                    {
+                        historyIndex++;
+                    }
+                    Console.Write(consoleHistory[historyIndex]);
+                    consoleBuffer = new StringBuilder(consoleHistory[historyIndex]);
+                    lastKeyWasTab = false;
                 }
                 else if (key.Key == ConsoleKey.Backspace && consoleBuffer.Length > 0)
                 {
                     consoleBuffer.Remove(consoleBuffer.Length - 1, 1);
                     Console.Write("\b \b");
+                    lastKeyWasTab = false;
                 }
                 else if (!char.IsControl(key.KeyChar))
                 {
                     consoleBuffer.Append(key.KeyChar);
                     Console.Write(key.KeyChar);
+                    tabBuffer = consoleBuffer;
+                    lastKeyWasTab = false;
                 }
             }
+        }
+
+        public static string AnsiToConsoleColor(string text)
+        {
+            string[] ansiCodes = new string[] { "\u001b[90m", "\u001b[91m", "\u001b[92m", "\u001b[93m", "\u001b[94m", "\u001b[95m", "\u001b[96m", "\u001b[97m", "\u001b[0m" };
+            string[] consoleColors = new string[] { ConsoleColorExtension.Black.ToString(), ConsoleColorExtension.Red.ToString(), ConsoleColorExtension.Green.ToString(), ConsoleColorExtension.Yellow.ToString(), ConsoleColorExtension.Blue.ToString(), ConsoleColorExtension.Magenta.ToString(), ConsoleColorExtension.Cyan.ToString(), ConsoleColorExtension.White.ToString(), ConsoleColorExtension.Default.ToString() };
+            for (int i = 0; i < ansiCodes.Count(); i++)
+            {
+                if (text.Contains(ansiCodes[i]))
+                {
+                    text = text.Replace(ansiCodes[i], consoleColors[i]);
+                }
+            }
+            return text;
         }
 
         public static void PrintF(string text)
@@ -125,6 +270,10 @@ namespace CE
             }
             Console.ForegroundColor = ConsoleColorExtension.Default.ToConsoleColor();
             bool isfirstRealText = true;
+            if (text.Contains("\u001b"))
+            {
+                text = AnsiToConsoleColor(text);
+            }
             if (text.Contains("\x00"))
             {
                 string[] textElements = text.Split('\x00');

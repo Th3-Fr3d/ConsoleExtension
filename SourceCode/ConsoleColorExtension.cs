@@ -67,6 +67,5 @@ namespace CE
                 throw new IndexOutOfRangeException("COLOR_PARAMETER_OUT_OF_RANGE");
             }
         }
-
     }
 }
